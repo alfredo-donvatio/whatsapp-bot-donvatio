@@ -1,0 +1,73 @@
+version: '3.7'
+
+services:
+  postgres:
+    container_name: postgres_vatio
+    image: postgres:15
+    networks:
+      - evolution_network
+    restart: always
+    environment:
+      - POSTGRES_DB=evolution
+      - POSTGRES_USER=vatio_user
+      - POSTGRES_PASSWORD=vatio_password
+    volumes:
+      - postgres_data_vatio:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    container_name: redis_vatio
+    image: redis:latest
+    networks:
+      - evolution_network
+    restart: always
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+      
+  fastapi:
+    build:
+      context: C:\Users\ALFREDOBESCOSBARROSO\Desktop\don vatio\whatsapp integracion colaboradores
+    container_name: fastapi_bot
+    networks:
+      - evolution_network
+    ports:
+      - "8000:8000"
+    restart: always
+
+  evolution_api:
+    container_name: evolution_api_vatio
+    # Esta versión es la que permite generar el QR correctamente
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: always
+    networks:
+      - evolution_network
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVER_URL=http://192.168.3.164:8080
+      - TZ=Europe/Madrid
+      - LANGUAGE=es
+      - AUTHENTICATION_API_KEY=donvatio_secret_key_123
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://vatio_user:vatio_password@postgres_vatio:5432/evolution
+      - DATABASE_SAVE_DATA_INSTANCE=true
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://redis_vatio:6379
+      - CHATWOOT_ENABLED=true
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - evolution_instances:/evolution/instances
+      
+
+networks:
+  evolution_network:
+    driver: bridge
+    name: evolution_network
+
+volumes:
+  postgres_data_vatio:
+  evolution_instances:

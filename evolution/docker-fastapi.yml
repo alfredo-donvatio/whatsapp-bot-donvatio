@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  fastapi:
+    environment:
+      - JWT_SECRET=09234y5f09742365b0793q4j609q437wncpoweyutcnehtgtnuyehtvbni7590q3645bvqowy
+      - EVOLUTION_URL=http://evolution_api_vatio:8080
+      - API_KEY=donvatio_secret_key_123
+      - DV_URL=https://app.donvatio.es  
+    build:
+      context: C:\Users\ALFREDOBESCOSBARROSO\Desktop\don vatio\whatsapp integracion colaboradores
+      dockerfile: Dockerfile
+    container_name: fastapi_bot
+    networks:
+      - evolution_network
+    ports:
+      - "8000:8000"
+    restart: always
+
+networks:
+  evolution_network:
+    external: true
