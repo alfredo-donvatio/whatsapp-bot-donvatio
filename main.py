@@ -9,6 +9,7 @@ import json
 from dotenv import load_dotenv
 import os
 
+
 load_dotenv()
 
 app = FastAPI()
@@ -20,12 +21,34 @@ print(f"EVOLUTION_URL: {EVOLUTION_URL}")
 DV_URL = os.getenv("DV_URL", "https://app.donvatio.es")
 JWT_SECRET = os.getenv("JWT_SECRET")
 JWT_EXP_MINUTES = int(os.getenv("JWT_EXP_MINUTES", "60"))
+INSTANCE = os.getenv("INSTANCE", "don-vatio-nuevo")
+
+def configurar_webhook():
+    """Configura el webhook en Evolution API al arrancar"""
+    time.sleep(5)  # Espera a que Evolution API esté lista
+    url = f"{EVOLUTION_URL}/webhook/set/{INSTANCE}"
+    headers = {"apikey": API_KEY, "Content-Type": "application/json"}
+    body = {
+        "webhook": {
+            "enabled": True,
+            "url": "http://172.18.0.2:8000/webhook/message",
+            "webhookByEvents": False,
+            "webhookBase64": False,
+            "events": ["MESSAGES_UPSERT"]
+        }
+    }
+    try:
+        response = requests.post(url, json=body, headers=headers)
+        print(f"Webhook configurado: {response.status_code}")
+    except Exception as e:
+        print(f"Error configurando webhook: {e}")
+
 
 colaboradores = {
-    "don-vatio": {
+    "don-vatio-nuevo": {
         "subdominio": "https://zairabovino.campaigndonvatio.es/",
         "nombre": "Test oficina Alfredo",
-        "instancia": "don-vatio"
+        "instancia": "don-vatio-nuevo"
     },
 }
 
@@ -66,6 +89,11 @@ def enviar_mensaje(numero: str, instancia: str, texto: str):
     print(f"Enviando a {url} → {numero}")
     response = requests.post(url, json=body, headers=headers)
     print(f"Respuesta: {response.status_code} {response.text}")
+
+@app.on_event("startup")
+async def startup_event():
+    import threading
+    threading.Thread(target=configurar_webhook, daemon=True).start()
 
 @app.post("/webhook/message")
 async def recibir_mensaje(request: Request):
@@ -118,6 +146,8 @@ Responde con el número de tu elección.""")
         enviar_mensaje(numero, instancia, "Perfecto. Ahora envíame una foto de tu factura de luz.")
 
     elif isinstance(estado_actual, dict) and estado_actual.get("paso") == "esperando_factura":
+        print(f"ESTADO ACTUAL: {estado_actual}")
+        
         email = estado_actual["email"]
         message_id = data["data"]["key"]["id"]
     
@@ -133,7 +163,7 @@ Responde con el número de tu elección.""")
             base64_data = download_response.json()["base64"]
             
             # 2. Convertir base64 a bytes
-            import base64
+            
             pdf_bytes = base64.b64decode(base64_data)
             
             # 3. Obtener token Don Vatio
@@ -152,6 +182,22 @@ Responde con el número de tu elección.""")
             
             resultado = response.json()
             print(f"Resultado API: {resultado}")
+
+            # Guardar datos para contratación
+            estados[numero] = {
+                "paso": "pregunta_alta",
+                "email": email,
+                "titular": resultado["comparativa"]["titular"],
+                "direccion": resultado["comparativa"]["direccion"],
+                "poblacion": resultado["comparativa"]["poblacion"],
+                "provincia": resultado["comparativa"]["provincia"],
+                "cp": resultado["comparativa"]["cp"],
+                "telefono": resultado["comparativa"]["telefono"],
+                "idComparativa": resultado["comparativa"]["idComparativa"],
+                "idTarifaComparativa": resultado["comparativa"]["situacion_actual"]["idTarifaComparativa"],
+                "idFactura": resultado["comparativa"]["situacion_actual"]["idFactura"],
+                "tipo_simulacion": resultado["comparativa"]["situacion_actual"]["tipo_simulacion"],
+            }
             
             if resultado.get("estado") == "RECHAZADA":
                 enviar_mensaje(numero, instancia, "❌ No hemos podido procesar tu factura. ¿Puedes enviarnos una imagen más clara?")
@@ -160,15 +206,97 @@ Responde con el número de tu elección.""")
                 titular = resultado.get("comparativa", {}).get("titular", "")
 
                 enviar_mensaje(numero, instancia, f"✅ Factura procesada, {titular}.\n\n"f"💡 Podrías ahorrar *{ahorro}€ al año* cambiando de tarifa.\n\n"
-    f"Un asesor se pondrá en contacto contigo pronto para explicarte las opciones."
+    f"¿Te interesa darte de alta en nuestra tarifa?Responde *SI* o *NO*."
 )
             
         except Exception as e:
             print(f"Error procesando factura: {e}")
             enviar_mensaje(numero, instancia, "Ha ocurrido un error procesando tu factura. Por favor inténtalo más tarde.")
-        
-        estados[numero] = "inicio"
+            estados[numero] = "inicio"
 
+    elif isinstance(estado_actual, dict) and estado_actual.get("paso") == "pregunta_alta":
+        if mensaje.upper() == "SI":
+            estados[numero]["paso"] = "pregunta_tipo_cliente"
+            enviar_mensaje(numero, instancia, "¿Eres particular o empresa?\n\n1️⃣ Particular\n2️⃣ Empresa")
+        elif mensaje.upper() == "NO":
+            estados[numero] = "inicio"
+            enviar_mensaje(numero, instancia, "De acuerdo, si cambias de opinión escríbenos. ¡Hasta pronto! 👋")
+        else:
+            enviar_mensaje(numero, instancia, "Por favor responde *SI* o *NO*.")
+
+    elif isinstance(estado_actual, dict) and estado_actual.get("paso") == "pregunta_tipo_cliente":
+        if mensaje == "1":
+            estados[numero]["paso"] = "pedir_telefono_alta"
+            estados[numero]["tipo_cliente"] = "particular"
+            enviar_mensaje(numero, instancia, "Por favor dime tu número de teléfono de contacto.")
+        elif mensaje == "2":
+            estados[numero]["paso"] = "pedir_telefono_alta"
+            estados[numero]["tipo_cliente"] = "empresa"
+            enviar_mensaje(numero, instancia, "Por favor dime tu número de teléfono de contacto.")
+        else:
+            enviar_mensaje(numero, instancia, "Por favor responde *1* para particular o *2* para empresa.")
+
+    elif isinstance(estado_actual, dict) and estado_actual.get("paso") == "pedir_telefono_alta":
+        estados[numero]["telefono_contacto"] = mensaje
+        estados[numero]["paso"] = "pedir_email_alta"
+        enviar_mensaje(numero, instancia, "¿Cuál es tu email de contacto?")
+
+    elif isinstance(estado_actual, dict) and estado_actual.get("paso") == "pedir_email_alta":
+        estados[numero]["email_contacto"] = mensaje
+        estados[numero]["paso"] = "pedir_iban"
+        enviar_mensaje(numero, instancia, "Por favor dime tu IBAN (cuenta bancaria).\n\nEjemplo: ES12 3456 7890 1234 5678 9012")
+
+    elif isinstance(estado_actual, dict) and estado_actual.get("paso") == "pedir_iban":
+        estados[numero]["iban"] = mensaje
+        estados[numero]["paso"] = "pedir_dni_anverso"
+        enviar_mensaje(numero, instancia, "Envíame una foto del DNI por el anverso (parte delantera).")
+    
+    elif isinstance(estado_actual, dict) and estado_actual.get("paso") == "pedir_dni_anverso":
+    # Guardar imagen anverso como base64
+        try:
+            download_url = f"{EVOLUTION_URL}/chat/getBase64FromMediaMessage/{instancia}"
+            headers = {"apikey": API_KEY, "Content-Type": "application/json"}
+            download_response = requests.post(
+                download_url,
+                json={"message": data["data"], "convertToMp4": False},
+                headers=headers
+            )
+            estados[numero]["dni_anverso_base64"] = download_response.json()["base64"]
+            estados[numero]["paso"] = "pedir_dni_reverso"
+            enviar_mensaje(numero, instancia, "Perfecto. Ahora envíame una foto del DNI por el reverso (parte trasera).")
+        except Exception as e:
+            print(f"Error recibiendo DNI anverso: {e}")
+            enviar_mensaje(numero, instancia, "No pude recibir la imagen. Por favor inténtalo de nuevo.")
+
+    elif isinstance(estado_actual, dict) and estado_actual.get("paso") == "pedir_dni_reverso":
+        try:
+            download_url = f"{EVOLUTION_URL}/chat/getBase64FromMediaMessage/{instancia}"
+            headers = {"apikey": API_KEY, "Content-Type": "application/json"}
+            download_response = requests.post(
+                download_url,
+                json={"message": data["data"], "convertToMp4": False},
+                headers=headers
+            )
+            estados[numero]["dni_reverso_base64"] = download_response.json()["base64"]
+            estados[numero]["paso"] = "confirmar_datos"
+
+            # Mostrar resumen para confirmar
+            e = estados[numero]
+            resumen = (
+                f"📋 *Resumen de tus datos:*\n\n"
+                f"👤 Titular: {e['titular']}\n"
+                f"📍 Dirección: {e['direccion']}, {e['poblacion']}, {e['provincia']}\n"
+                f"📞 Teléfono: {e['telefono_contacto']}\n"
+                f"📧 Email: {e['email_contacto']}\n"
+                f"🏦 IBAN: {e['iban']}\n\n"
+                f"¿Son correctos? Responde *SI* para confirmar o *NO* para corregir."
+            )
+            enviar_mensaje(numero, instancia, resumen)
+        except Exception as e:
+            print(f"Error recibiendo DNI reverso: {e}")
+            enviar_mensaje(numero, instancia, "No pude recibir la imagen. Por favor inténtalo de nuevo.")
+ 
+    
     elif estado_actual == "esperando_email_recordatorio":
         try:
             user_id = await get_user_id(subdominio)
@@ -183,7 +311,7 @@ Responde con el número de tu elección.""")
         except Exception as e:
             print(f"Error API: {e}")
             enviar_mensaje(numero, instancia, "Ha ocurrido un error. Por favor inténtalo más tarde.")
-        estados[numero] = "inicio"
+            estados[numero] = "inicio"
 
     elif estado_actual == "esperando_datos_llamada":
         try:
@@ -202,6 +330,60 @@ Responde con el número de tu elección.""")
         except Exception as e:
             print(f"Error API: {e}")
             enviar_mensaje(numero, instancia, "Ha ocurrido un error. Por favor inténtalo más tarde.")
-        estados[numero] = "inicio"
+            estados[numero] = "inicio"
 
+    elif isinstance(estado_actual, dict) and estado_actual.get("paso") == "confirmar_datos":
+        if mensaje.upper() == "SI":
+            try:
+                e = estados[numero]
+                user_id = await get_user_id(subdominio)
+                token = create_token(user_id)
+                
+                # Convertir base64 a bytes para los DNIs
+                dni_anverso_bytes = base64.b64decode(e["dni_anverso_base64"])
+                dni_reverso_bytes = base64.b64decode(e["dni_reverso_base64"])
+                
+                async with httpx.AsyncClient(timeout=60) as client:
+                    response = await client.post(
+                        f"{DV_URL}/api/contratos/nuevo",
+                        headers={"Authorization": f"Bearer {token}"},
+                        data={
+                            "dni_titular": "",
+                            "nombre_titular": e["titular"],
+                            "dni_firmante": "",
+                            "nombre_firmante": e["titular"],
+                            "cp_cups": e["cp"],
+                            "poblacion_cups": e["poblacion"],
+                            "direccion_cups": e["direccion"],
+                            "provincia_cups": e["provincia"],
+                            "telefono": e["telefono_contacto"],
+                            "email": e["email_contacto"],
+                            "cuenta_bancaria": e["iban"],
+                            "idTarifaComparativa": e["idTarifaComparativa"],
+                            "idComparativa": e["idComparativa"],
+                            "idFactura": e["idFactura"],
+                            "tipo_simulacion": e["tipo_simulacion"],
+                            "id_usuario_campaign": str(user_id),
+                        },
+                        files={
+                            "dni": ("dni_anverso.jpg", dni_anverso_bytes, "image/jpeg"),
+                            "dni_reverso": ("dni_reverso.jpg", dni_reverso_bytes, "image/jpeg"),
+                        }
+                    )
+                
+                print(f"Contratación: {response.status_code} {response.text}")
+                enviar_mensaje(numero, instancia, "✅ ¡Solicitud enviada correctamente! Un agente revisará tu contratación y te contactará pronto. ¡Gracias!")
+                
+            except Exception as e:
+                import traceback
+                print(f"Error contratación: {e}")
+                print(traceback.format_exc())
+                enviar_mensaje(numero, instancia, "Ha ocurrido un error. Por favor contacta con nosotros directamente.")
+            estados[numero] = "inicio"
+        
+        elif mensaje.upper() == "NO":
+            estados[numero] = "inicio"
+            enviar_mensaje(numero, instancia, "De acuerdo. Si quieres volver a intentarlo escribe *hola*. ¡Hasta pronto! 👋")
+        else:
+            enviar_mensaje(numero, instancia, "Por favor responde *SI* para confirmar o *NO* para cancelar.")
     return {"status": "ok"}

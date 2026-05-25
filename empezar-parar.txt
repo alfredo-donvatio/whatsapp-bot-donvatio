@@ -1,0 +1,11 @@
+parar
+
+docker-compose -f docker-compose.yml down
+docker-compose -f docker-fastapi.yml down
+
+empezar
+
+docker-compose -f docker-compose.yml up -d
+docker-compose -f docker-fastapi.yml up -d
+
+
