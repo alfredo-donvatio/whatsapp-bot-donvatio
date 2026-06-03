@@ -7,6 +7,8 @@ services:
       - EVOLUTION_URL=http://evolution_api_vatio:8080
       - API_KEY=donvatio_secret_key_123
       - DV_URL=https://app.donvatio.es  
+      - OCR_URL=http://10.20.1.82:8000
+      - OCR_API_KEY=N1DUObMZvXWzgy@MFwMWe+5KGx^7Al
     build:
       context: C:\Users\usuario\Desktop\don vatio\whatsapp integracion colaboradores
       dockerfile: Dockerfile
