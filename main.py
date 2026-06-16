@@ -383,7 +383,7 @@ async def recibir_mensaje(request: Request):
             enviar_mensaje(numero, instancia, "Perfecto. Ahora envíame una foto del DNI por el reverso (parte trasera).")
         except Exception as e:
             print(f"Error recibiendo DNI anverso: {e}")
-            enviar_mensaje(numero, instancia, "No pude recibir la imagen. Por favor inténtalo de nuevo.")
+            enviar_mensaje(numero, instancia, "❌ No pude recibir la imagen. Por favor envíame una foto del DNI por el anverso (parte delantera).")
 
     elif isinstance(estado_actual, dict) and estado_actual.get("paso") == "pedir_dni_reverso":
         try:
@@ -411,6 +411,17 @@ async def recibir_mensaje(request: Request):
                 print(f"OCR status: {ocr_response.status_code}")
                 print(f"OCR respuesta: {ocr_response.text}")
                 ocr_data = ocr_response.json()
+                ocr_dni = ocr_data.get("dni", {})
+
+                # Validar que el OCR extrajo datos mínimos
+                if not ocr_dni.get("numero") or not ocr_dni.get("nombre"):
+                    enviar_mensaje(numero, instancia, "❌ No he podido leer el DNI. Por favor envía una foto más clara del anverso.")
+                    estados[numero]["paso"] = "pedir_dni_anverso"
+                    estados[numero].pop("dni_anverso_base64", None)
+                    estados[numero].pop("dni_reverso_base64", None)
+                    return
+
+
             except Exception as e:
                 print(f"OCR error: {e}")
                 ocr_data = {"dni": {"nombre": "", "apellidos": "", "numero": ""}}
@@ -442,7 +453,8 @@ async def recibir_mensaje(request: Request):
             
         except Exception as e:
             print(f"Error recibiendo DNI reverso: {e}")
-            enviar_mensaje(numero, instancia, "No pude recibir la imagen. Por favor inténtalo de nuevo.")
+            enviar_mensaje(numero, instancia, "❌ No pude recibir la imagen. Por favor envíame una foto del DNI por el reverso (parte trasera).")
+            estados[numero]["paso"] = "pedir_dni_reverso"
 
     elif isinstance(estado_actual, dict) and estado_actual.get("paso") == "confirmar_datos":
         if mensaje.upper() == "SI":
