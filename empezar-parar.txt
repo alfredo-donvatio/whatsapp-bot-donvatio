@@ -1,5 +1,5 @@
 parar
-
+  
 docker-compose -f docker-compose.yml down
 docker-compose -f docker-fastapi.yml down
 
@@ -9,3 +9,12 @@ docker-compose -f docker-compose.yml up -d
 docker-compose -f docker-fastapi.yml up -d
 
 
+ Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.\start_bot.ps1
+
+reiniciar 
+
+docker-compose -f docker-fastapi.yml down
+docker rmi evolution-fastapi
+docker-compose -f docker-fastapi.yml up --build -d
+.\start_bot.ps1

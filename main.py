@@ -52,11 +52,12 @@ colaboradores = {
         "nombre": "Test oficina Alfredo",
         "instancia": "don-vatio-nuevo",
         "asesor_incluido": True,
-        "email": "zaira@donvatio.es"
+        "email": "informatica@donvatio.es"
     },
 }
 
 estados = {}
+mensajes_procesados = set()
 
 def b64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
@@ -138,6 +139,14 @@ async def recibir_mensaje(request: Request):
 
     print(f"[{instancia}][{numero}] Estado: {estado_actual} | Mensaje: {mensaje}")
 
+    message_id = data["data"]["key"]["id"]
+    if message_id in mensajes_procesados:
+        return {"status": "ok"}
+    mensajes_procesados.add(message_id)
+
+    
+        
+
     if estado_actual == "inicio" or mensaje.lower() in ["hola", "buenas", "buenos dias", "menu", "inicio"]:
         estados[numero] = {"paso": "esperando_factura", "email": ""}
         enviar_mensaje(numero, instancia, f"¡Hola! 👋 Soy el asistente de {nombre_colaborador}.⚡\n\nEstoy aquí para ayudarte a ahorrar en tu factura de luz o gas. ⚡⛽\n\nEnvíame tu factura y en segundos te diré cuánto puedes ahorrar. 😎")
@@ -158,7 +167,9 @@ async def recibir_mensaje(request: Request):
             user_id = await get_user_id(subdominio)
             token = create_token(user_id)
 
-            async with httpx.AsyncClient(timeout=60) as client:
+            print(f"Email usado para conexión 1: {email}"),
+
+            async with httpx.AsyncClient(timeout=90) as client:
                 response = await client.post(
                     f"{DV_URL}/api/envio_facturas",
                     headers={"Authorization": f"Bearer {token}"},
@@ -166,6 +177,7 @@ async def recibir_mensaje(request: Request):
                     files={"files": ("factura.pdf", pdf_bytes, "application/pdf")},
                     data={"agente": str(user_id), "terminos": "true"}
                 )
+                print(f"Email usado para conexión 2: {email}"),
 
             resultado = response.json()
             print(f"Resultado completo API: {resultado}")
@@ -198,34 +210,72 @@ async def recibir_mensaje(request: Request):
 
             if hay_ahorro:
                 enviar_mensaje(numero, instancia, f"✅ Factura procesada, {titular}.\n\n💡 Podrías ahorrar *{ahorro}€ al año* cambiando de tarifa.")
-                
-                opciones = resultado.get("comparativa", {}).get("opciones", [])
-                if opciones:
-                    medallas = ["🥇", "🥈", "🥉"]
-                    top_tarifas = "🌟Top Tarifas🌟\n"
-                    for i, opcion in enumerate(opciones[:3]):
-                        nombre_comercializadora = opcion.get("comercializadora", {}).get("nombre", "")
-                        ahorro_cliente = opcion.get("ahorro_cliente")
-                        if ahorro_cliente is not None:
-                            top_tarifas += f"{medallas[i]}*{nombre_comercializadora}* - *{abs(ahorro_cliente)}€/año*\n"
-                        else:
-                            top_tarifas += f"{medallas[i]}*{nombre_comercializadora}*\n"
-                    enviar_mensaje(numero, instancia, top_tarifas)
             else:
                 enviar_mensaje(numero, instancia, f"✅ Factura procesada, {titular}.")
+                
+            opciones = resultado.get("comparativa", {}).get("opciones", [])
 
-            # Mensaje según ahorro
-            if hay_ahorro:
-                estados[numero]["paso"] = "pregunta_tramitar"
-                enviar_mensaje(numero, instancia, "¿Deseas tramitar tu factura ahora?\n\nPor favor responde con *SI* o *NO*")
-            else:
-                estados[numero]["paso"] = "pregunta_asesor_sin_ahorro"
-                enviar_mensaje(numero, instancia, "💡 ¿Deseas que te contacte un asesor para ver qué opciones tienes?\n\nPor favor responde con *SI* o *NO*")
+            if hay_ahorro and opciones:
+                top_3 = []
+                top_3.append(opciones[0])
+                primera_comercializadora = opciones[0].get("comercializadora", {}).get("nombre", "")
+
+                for opcion in opciones[1:]:
+                    nombre = opcion.get("comercializadora", {}).get("nombre", "")
+                    if nombre != primera_comercializadora:
+                        top_3.append(opcion)
+                    if len(top_3) == 3:
+                        break
+
+                medallas = ["🥇", "🥈", "🥉"]
+                top_tarifas = "🌟Top Tarifas🌟\n\n"
+
+                for i, opcion in enumerate(top_3):
+                    nombre_comercializadora = opcion.get("comercializadora", {}).get("nombre", "")
+                    nombre_producto = opcion.get("nombre", "")
+                    ahorro_cliente = opcion.get("ahorro_cliente")
+                    precios = opcion.get("precios", {})
+                    
+                    top_tarifas += f"{medallas[i]}*{nombre_comercializadora}* - {nombre_producto}\n"
+                    if ahorro_cliente is not None:
+                        top_tarifas += f"   💰 Ahorro: *{abs(ahorro_cliente)}€/año*\n"
+                    if precios.get("P1"):
+                        top_tarifas += f"   ⚡ Potencia: {precios.get('P1')}€\n"
+                    if precios.get("E1"):
+                        top_tarifas += f"   🔌 Energía: {precios.get('E1')}€/kWh\n"
+                    top_tarifas += "\n"
+                
+                enviar_mensaje(numero, instancia, top_tarifas)
+
+            elif not hay_ahorro:
+                situacion = resultado.get("comparativa", {}).get("situacion_actual", {})
+                importe_anual = situacion.get("importe_anual")
+                importe_potencia = situacion.get("importe_potencia")
+                importe_energia = situacion.get("importe_energia")
+                
+                mensaje_simulacion = "📊 *Simulación gasto anual:*\n\n"
+                if importe_anual is not None:
+                    mensaje_simulacion += f"💰 Total: *{importe_anual}€/año*\n"
+                if importe_potencia is not None:
+                    mensaje_simulacion += f"⚡ Potencia: {importe_potencia}€\n"
+                if importe_energia is not None:
+                    mensaje_simulacion += f"🔌 Energía: {importe_energia}€\n"
+                
+                enviar_mensaje(numero, instancia, mensaje_simulacion)    
+            
+            estados[numero]["paso"] = "pregunta_tramitar"
+            enviar_mensaje(numero, instancia, "¿Deseas tramitar tu factura ahora?\n\nPor favor responde con *SI* o *NO*")
+        
+            #estados[numero]["paso"] = "pregunta_asesor_sin_ahorro"  este escenario hay  que borralo
+            #enviar_mensaje(numero, instancia, "💡 ¿Deseas que te contacte un asesor para ver qué opciones tienes?\n\nPor favor responde con *SI* o *NO*")
         
         except Exception as e:
+            import traceback
             print(f"Error procesando factura: {e}")
-            enviar_mensaje(numero, instancia, "❌ No he podido leer tu factura. Por favor envíame el PDF de tu factura de luz.")
-            estados[numero]["paso"] = "esperando_factura"
+            if estados.get(numero, {}).get("paso") == "esperando_factura" or estados.get(numero) == "esperando_factura":
+                enviar_mensaje(numero, instancia, "❌ No he podido leer tu factura. Por favor envíame el PDF de tu factura de luz.")
+                estados[numero]["paso"] = "esperando_factura"
+            print(traceback.format_exc())
                  
     
                
