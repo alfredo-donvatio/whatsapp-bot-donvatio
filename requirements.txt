@@ -3,4 +3,7 @@ uvicorn
 httpx
 python-dotenv
 requests
+redis
+opencv-python-headless
+numpy
 
