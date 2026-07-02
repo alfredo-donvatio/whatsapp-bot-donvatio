@@ -181,7 +181,7 @@ async def recibir_mensaje(request: Request):
 
     if estado_actual == "inicio" or mensaje.lower() in ["hola", "buenas", "buenos dias", "menu", "inicio"]:
         estados[numero] = {"paso": "esperando_factura", "email": ""}
-        enviar_mensaje_con_cancelar(numero, instancia, f"¡Hola! 👋 Soy el asistente de {nombre_colaborador}.⚡\n\nEstoy aquí para ayudarte a ahorrar en tu factura de luz o gas. ⚡⛽\n\nEnvíame tu factura en formato PDF y en segundos te diré cuánto puedes ahorrar. 😎\n\n Al subir tu factura aceptas nuestros términios y condiciones: ✅📝\n\n www.nuestrosterminosycondiciones.es")
+        enviar_mensaje_con_cancelar(numero, instancia, f"¡Hola! 👋 Soy el asistente de {nombre_colaborador}.⚡\n\nEstoy aquí para ayudarte a ahorrar en tu factura de luz o gas. ⚡⛽\n\nEnvíame tu factura en formato PDF y en segundos te diré cuánto puedes ahorrar. 😎\n\n Al subir tu factura aceptas nuestros términos y condiciones: ✅📝\n\n www.nuestrosterminosycondiciones.es")
 
     elif isinstance(estado_actual, dict) and estado_actual.get("paso") == "esperando_factura":
         enviar_mensaje(numero, instancia, "⏳ Procesando tu factura, esto puede tardar unos segundos...")
